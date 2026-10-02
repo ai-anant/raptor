@@ -992,6 +992,17 @@ def run_skill_dispatch(
             skipped_reason="claude CLI transport disabled "
             "(RAPTOR_CC_TRANSPORT_DISABLED is set)")
 
+    # Operator-forced local-only posture: these skill passes are
+    # claude-bound (agentic tool-using investigations; there is no
+    # Ollama agent loop), so under RAPTOR_NO_CLAUDE skip them cleanly
+    # rather than spawning claude. Same skip shape as the other gates.
+    import os
+    if os.environ.get("RAPTOR_NO_CLAUDE"):
+        return SkillDispatchResult(
+            ran=False,
+            skipped_reason="claude CLI skipped (RAPTOR_NO_CLAUDE is set); "
+            "this pass requires the Claude Code agent")
+
     # Realpath at the resolution seam: symlinked installs otherwise
     # fail the mount-ns visibility check and silently downgrade the
     # dispatch to Landlock-only (see resolve_claude_cli).
@@ -999,10 +1010,30 @@ def run_skill_dispatch(
     if not claude_bin:
         return SkillDispatchResult(ran=False, skipped_reason="claude not on PATH")
 
+    # The caller's cheap "is there even work?" preflight runs BEFORE the
+    # claude-usability probe: if the pass would skip anyway (e.g. no
+    # analysis report, nothing exploitable to validate), that reason is
+    # more informative than "claude not usable", and it avoids a wasted
+    # probe (a billed call on a cold cache) for a pass that isn't going
+    # to dispatch regardless.
     if preflight is not None:
         reason = preflight()
         if reason is not None:
             return SkillDispatchResult(ran=False, skipped_reason=reason)
+
+    # Present-but-unusable claude (installed, NOT logged in) must skip
+    # like "not on PATH" — otherwise the pass spawns `claude -p`, which
+    # exits "Not logged in · Please run /login", and the run surfaces a
+    # noisy "returned 1" instead of a clean skip. The cc-probe
+    # (cache-first; a real billed call only on a cold cache) returns None
+    # exactly when the transport is not trustworthy on this install,
+    # which includes the unauthenticated case.
+    from core.llm.cc_probe import probe_cc_session_model
+    if probe_cc_session_model(claude_bin) is None:
+        return SkillDispatchResult(
+            ran=False,
+            skipped_reason="claude CLI present but not usable "
+            "(not logged in, or pre-flight probe failed) — run `claude /login`")
 
     target = Path(target).resolve()
     context_dirs = [Path(d).resolve() for d in context_dirs]

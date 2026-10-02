@@ -84,7 +84,12 @@ def _patch_passes(dispatcher):
     with patch("core.orchestration.skill_dispatch.subprocess.run",
                side_effect=_subprocess_side_effect), \
          patch("core.orchestration.skill_dispatch.run_untrusted_networked",
-               side_effect=_sandbox_side_effect):
+               side_effect=_sandbox_side_effect), \
+         patch("core.llm.cc_probe.probe_cc_session_model",
+               return_value="test-model"):
+        # The dispatch gate now probes whether claude is USABLE (not just
+        # on PATH) and skips when the probe returns None — these tests
+        # exercise the post-gate dispatch flow, so stand in a usable claude.
         yield combined
 
 

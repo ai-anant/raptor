@@ -130,6 +130,8 @@ def _run(tmp, run_dir, *, sandbox=None, **overrides):
                side_effect=dispatcher), \
          patch("core.orchestration.skill_dispatch.run_untrusted_networked",
                side_effect=sandbox or dispatcher), \
+         patch("core.llm.cc_probe.probe_cc_session_model",
+               return_value="test-model"), \
          patch.dict("os.environ", _FIRST_PARTY_PROVIDER_ENV):
         return run_skill_dispatch(**kwargs)
 
@@ -174,6 +176,38 @@ class GateOrderTests(unittest.TestCase):
             result = _run(tmp, Path(tmp) / "run", claude_bin=None)
         self.assertFalse(result.ran)
         self.assertIn("claude not on PATH", result.skipped_reason)
+
+    def test_raptor_no_claude_skips_cleanly(self):
+        # Operator-forced local-only posture: skip the claude-bound pass
+        # before any resolution, with a clean reason (not an error).
+        import os
+        with TemporaryDirectory() as tmp, \
+                patch.dict(os.environ, {"RAPTOR_NO_CLAUDE": "1"}):
+            result = _run(tmp, Path(tmp) / "run")
+        self.assertFalse(result.ran)
+        self.assertIn("RAPTOR_NO_CLAUDE", result.skipped_reason)
+        self.assertIsNone(result.run_dir)
+
+    def test_present_but_unauthenticated_claude_skips_not_errors(self):
+        # claude installed but not logged in: the cc-probe returns None,
+        # so the pass must SKIP cleanly rather than spawn claude -p and
+        # surface a "returned 1 / Not logged in" error. Calls
+        # run_skill_dispatch directly (not _run, which stubs the probe
+        # as usable) so the probe=None path is exercised.
+        with TemporaryDirectory() as tmp, \
+                patch("core.llm.cc_adapter.resolve_claude_cli",
+                      return_value="/fake/claude"), \
+                patch("core.llm.cc_probe.probe_cc_session_model",
+                      return_value=None), \
+                patch.dict("os.environ", _FIRST_PARTY_PROVIDER_ENV):
+            result = run_skill_dispatch(
+                command="validate", target=Path(tmp), tools="Read",
+                budget_usd="1.00", timeout_s=60,
+                caller_label="t", log_label="t",
+                build_prompt=lambda d: "p", claude_bin="/fake/claude",
+            )
+        self.assertFalse(result.ran)
+        self.assertIn("not usable", result.skipped_reason)
 
     def test_symlinked_claude_dispatches_via_realpath(self):
         # The mount-ns visibility check realpaths cmd[0]; execing the
@@ -247,7 +281,9 @@ class DispatchFlowTests(unittest.TestCase):
             with patch("core.orchestration.skill_dispatch.subprocess.run",
                        side_effect=_tracking), \
                  patch("core.orchestration.skill_dispatch."
-                       "run_untrusted_networked", side_effect=dispatcher):
+                       "run_untrusted_networked", side_effect=dispatcher), \
+                 patch("core.llm.cc_probe.probe_cc_session_model",
+                       return_value="test-model"):
                 result = run_skill_dispatch(
                     command="validate", target=Path(tmp), tools="Read",
                     budget_usd="1.00", timeout_s=60,
@@ -382,6 +418,8 @@ class DispatchFlowTests(unittest.TestCase):
                        side_effect=_tracking), \
                  patch("core.orchestration.skill_dispatch."
                        "run_untrusted_networked", side_effect=_sandbox), \
+                 patch("core.llm.cc_probe.probe_cc_session_model",
+                       return_value="test-model"), \
                  self.assertRaises(KeyboardInterrupt):
                 run_skill_dispatch(
                     command="validate", target=Path(tmp), tools="Read",
@@ -1671,6 +1709,8 @@ class StartLifecycleFailureDetailTests(unittest.TestCase):
                  patch("core.orchestration.skill_dispatch."
                        "run_untrusted_networked",
                        side_effect=dispatcher), \
+                 patch("core.llm.cc_probe.probe_cc_session_model",
+                       return_value="test-model"), \
                  patch("core.run.pin._process_project", None), \
                  patch("core.run.pin._process_project_set", False), \
                  patch.dict("os.environ", _FIRST_PARTY_PROVIDER_ENV), \
