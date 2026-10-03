@@ -101,6 +101,27 @@ def test_open_weight_lineages_resolve_distinctly():
     assert family_of("gemma-3-27b") == "google"   # Google's open line
     assert family_of("yi-34b") == "yi"
     assert family_of("phi-4") == "phi"
+    assert family_of("phi4") == "phi"  # digit-glued, no separator
+
+
+def test_aggregator_plus_provider_double_prefix():
+    """Aggregator strip + provider peel compose: together/ollama/qwen3
+    peels both layers and resolves the underlying lineage."""
+    assert family_of("together/ollama/qwen3-27b") == "qwen"
+    assert family_of("groq/ollama/deepseek-r1") == "deepseek"
+    assert family_of("openrouter/ollama/llama-3.1-8b") == "meta"
+
+
+def test_short_stems_require_separator():
+    """Short stems (o1/o3/o4) only match with a separator, not a
+    digit — ``o100`` is not an OpenAI model."""
+    assert family_of("o1-preview") == "openai"
+    assert family_of("o3-mini") == "openai"
+    assert family_of("o4-mini") == "openai"
+    assert family_of("o1") == "openai"
+    # Digit-glued short stems must NOT match.
+    assert family_of("o100-model") == "unknown"
+    assert family_of("o3000") == "unknown"
 
 
 def test_gpt_oss_is_openai_not_matched_as_bare_gpt():

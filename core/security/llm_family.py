@@ -61,10 +61,11 @@ _PROVIDER_STEMS: tuple[tuple[str, Family], ...] = (
 
 _MODEL_STEMS: tuple[tuple[str, Family], ...] = (
     ("claude", "anthropic"),
-    # ``gpt-oss`` is OpenAI's open-weight line, a DIFFERENT lineage from
-    # the hosted ``gpt-*`` API models — it must be matched BEFORE the
-    # ``gpt`` stem, since the loop returns the first match and
-    # ``gpt-oss-20b`` would otherwise resolve to openai.
+    # ``gpt-oss`` is OpenAI's open-weight line — same vendor family as
+    # the hosted ``gpt-*`` API models (conservative: shared training
+    # lineage cannot be ruled out). Must be matched BEFORE the ``gpt``
+    # stem since the loop returns the first match and ``gpt-oss-20b``
+    # would otherwise resolve via the shorter ``gpt`` stem anyway.
     ("gpt-oss", "openai"),
     ("gpt", "openai"),
     ("o1", "openai"),
@@ -458,15 +459,20 @@ def family_of(model_id: str) -> Family:
             return family
     for stem, family in _MODEL_STEMS:
         # Match the stem when it stands alone, is followed by a separator
-        # (``llama-3.1``, ``gpt-4o``), OR is followed immediately by a
-        # version digit/dot (``qwen3``, ``qwen2.5``, ``phi4``) — open
-        # model names frequently glue the version onto the family name
-        # with no separator, which the ``stem + "-"`` rule alone misses.
+        # (``llama-3.1``, ``gpt-4o``), OR — for stems of 3+ characters —
+        # is followed immediately by a version digit/dot (``qwen3``,
+        # ``qwen2.5``, ``phi4``).  Open model names frequently glue the
+        # version onto the family name with no separator, which the
+        # ``stem + "-"`` rule alone misses.  Short stems (``o1``, ``o3``,
+        # ``o4``) skip the digit rule: ``o100`` is not an OpenAI model,
+        # and the 2-char prefix sweeps too broadly.
         if needle == stem:
             return family
         if needle.startswith(stem):
             nxt = needle[len(stem):len(stem) + 1]
-            if nxt in "-_." or nxt.isdigit():
+            if nxt in "-_.":
+                return family
+            if nxt.isdigit() and len(stem) >= 3:
                 return family
     return "unknown"
 
