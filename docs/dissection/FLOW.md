@@ -315,3 +315,78 @@ Worth listing so a later port does not "replace" them with a model:
   orchestrator.
 - The coverage plugin, session ledger, and lifecycle hooks are
   process bookkeeping. They assume a Claude Code hook API.
+
+## Constraints added after the first pass
+
+These are portability constraints, not more call sites. They change
+how the issues above should be read.
+
+### Claude Code as the base shrinks the server menu
+
+The analysis path already speaks OpenAI-compatible HTTP
+(`OpenAICompatibleProvider`: Ollama, vLLM, LM Studio, via `base_url`).
+The decision layer does not. `bin/raptor` execs the `claude` binary.
+That binary talks Anthropic Messages, plus CLI flags that never become
+an HTTP call (`--json-schema`, `--resume`, `--effort`, hooks, plugins).
+
+A listed Anthropic route is not "Claude Code works":
+
+- llama.cpp's server README currently lists Anthropic Messages API
+  compatible chat completions. That is a route. It is also the server
+  with the hardware knobs (GPU layers, tensor split, KV cache dtype,
+  `--fit` shrinking context to VRAM). Those knobs are why it is the
+  one you want on odd hardware, and why a thin compatibility layer is
+  not the same product.
+- Ollama documents a Claude Code setup (`ANTHROPIC_BASE_URL`,
+  `ollama launch claude`). Its own compatibility page says it does
+  not implement prompt caching, forced `tool_choice`, or
+  `count_tokens`. Extended-thinking `budget_tokens` is accepted and
+  not enforced. Fewer knobs than llama.cpp. RAPTOR's own Ollama path
+  is the OpenAI `/v1` shim, not this Anthropic one.
+- vLLM is the OpenAI-compatible server RAPTOR already names. An
+  Anthropic-compatible front has been a moving target; treat "it
+  worked on this box" as a per-hardware fact.
+
+Hardware variation sits on top of the protocol gap: CUDA, ROCm,
+Metal, Vulkan, CPU, GGUF versus AWQ/FP8, flash-attn or not. A matrix
+of "which server, which GPU, which flag Claude Code sent" will not
+be one config.
+
+### Smaller context is the win condition
+
+`core/llm/config.py` already assumes this split: frontier context
+default 1,000,000 tokens, local default 32,000, local output default
+4,096. That 32k figure is one failure mode, not the taxonomy.
+
+Windows are small for different reasons, and they fail differently:
+
+- trained context and RoPE base
+- KV cache bytes, linear in context, layers, and KV heads
+- KV cache quant (q8/q4) buying window by spending quality
+- sliding-window or hybrid architectures
+- prefill time collapsing before VRAM does
+- a server `--fit` pass shrinking context so the model loads at all
+  (llama.cpp's fit floor is a few thousand tokens)
+
+Squeezing the resident prompt (CLAUDE.md, command body, skill file,
+analysis template) raises the fraction of those setups that can run
+the same workflow. A 60k fit budget and a 400k CVE-diff loop are not
+portable targets. They are frontier targets.
+
+### Own hardware and rented GPUs are not one "local"
+
+`docs/llm.md` puts both in a single "Local (Ollama)" column and marks
+the cost "Free". That column is wrong for a rented GPU box, and it
+is wrong for a 24 GB workstation.
+
+- Own machine: one or a few GPUs, VRAM is a hard cap, quant is
+  mandatory, context is the first thing sacrificed, airgap is
+  possible.
+- Rented GPUs: still your weights, not Claude, but the box can be
+  eight large GPUs, long context, higher precision. The limit is
+  rental cost, quota, and cold start — not the laptop's VRAM.
+  Prefix cache and tensor parallel are available. Do not size the
+  port for this and then claim it runs at home.
+
+Issue #6 mixed these. Keep them apart when picking worker caps,
+context budgets, and what "works locally" means.
