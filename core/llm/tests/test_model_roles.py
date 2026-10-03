@@ -141,6 +141,16 @@ class TestRoleValidation:
         assert r["analysis_model"] is primary
         assert r["code_model"] is code
 
+    def test_multi_roleless_with_judge_allowed(self):
+        """Two role-less entries plus a judge: first role-less is primary,
+        second becomes fallback, judge is auxiliary."""
+        p = ModelConfig(provider="ollama", model_name="local-primary")
+        f = ModelConfig(provider="ollama", model_name="local-secondary")
+        j = ModelConfig(provider="ollama", model_name="local-big", role="judge")
+        r = resolve_model_roles(p, [f, j])
+        assert r["analysis_model"] is p
+        assert j in r["judge_models"]
+
     def test_judge_without_any_analysis_still_raises(self):
         # Two-direction guard: with NO role-less entry and NO explicit
         # analysis role, a judge-only configuration keeps refusing.

@@ -157,6 +157,29 @@ class TestOllamaConfigPrimary:
         assert picked is not None
         assert picked.provider == "anthropic"
 
+    def test_ollama_entry_always_auth_resolvable(self, tmp_path, monkeypatch):
+        """Ollama needs no credential — auth-resolvable is unconditionally
+        True so the entry is eligible as both primary and fallback."""
+        from core.llm.config import _entry_auth_resolvable, ModelConfig
+        mc = ModelConfig(
+            provider="ollama", model_name="qwen3:latest", api_key=None,
+        )
+        assert _entry_auth_resolvable(mc) is True
+
+    def test_ollama_entry_zero_cost(self, tmp_path, monkeypatch):
+        """A config-file Ollama entry with an unknown model name gets
+        cost_per_1k_tokens=0.0, not the cloud fallback rate."""
+        _write_config(tmp_path, monkeypatch, [
+            {"provider": "ollama", "model": "local-custom"},
+        ])
+        _stub_autodetect(monkeypatch, ["other:latest"])
+
+        import core.llm.config as cfg
+        picked = cfg._get_default_primary_model()
+
+        assert picked is not None
+        assert picked.cost_per_1k_tokens == 0.0
+
     def test_offline_skips_ollama_primary(self, tmp_path, monkeypatch):
         """offline=True skips Step 2c (Ollama is a network-probing provider),
         matching how Steps 1/3 skip it."""

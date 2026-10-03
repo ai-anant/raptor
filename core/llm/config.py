@@ -1027,7 +1027,12 @@ def _model_config_from_entry(entry: dict) -> 'ModelConfig':
     from core.llm.model_data import resolve_model_costs, resolve_model_limits
     limits = resolve_model_limits(model_name) or {}
     costs = resolve_model_costs(model_name) or {}
-    cost_per_1k = (costs.get("input", 0.005) + costs.get("output", 0.005)) / 2
+    if costs:
+        cost_per_1k = (costs.get("input", 0.005) + costs.get("output", 0.005)) / 2
+    elif provider == "ollama":
+        cost_per_1k = 0.0
+    else:
+        cost_per_1k = 0.005
 
     # Honour the operator-configured remote Ollama host (see
     # ``_get_configured_models`` for the same fix in the cold-start
