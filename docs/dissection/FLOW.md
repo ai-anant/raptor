@@ -390,3 +390,60 @@ is wrong for a 24 GB workstation.
 
 Issue #6 mixed these. Keep them apart when picking worker caps,
 context budgets, and what "works locally" means.
+
+### The box this port is actually for
+
+Not a rented GPU node. Not four Sparks linked over ConnectX.
+At-home desktop or workstation, and the ceiling is one DGX Spark.
+
+The workload that has to fit:
+
+- one model, 120B parameters at most
+- one context, 200k tokens
+- one machine
+
+NVIDIA's current Spark is a GB10 with coherent unified memory, sold
+as 128 GB or 64 GB. ConnectX can tie up to four of them together.
+That cluster is out of scope. The 64 GB config cannot hold a 120B
+model and a 200k cache at the same time. The 128 GB config can, and
+only just: the weights take the majority of the memory, and the
+200k window is the rest. It is not spare room.
+
+So a 200k window is not "large enough for the current prompts."
+It is the whole machine. Framework text and the code under analysis
+compete for the same slots, and for the same unified memory.
+
+What does not fit in that budget:
+
+- The CVE-diff agent loop (400k, one site 600k) is larger than the
+  window. It cannot be a local path on this box.
+- The 60k analysis fit is already ~30% of 200k before the finding's
+  source is the point of the call. Priority-0 elision then cuts the
+  evidence to save the framework text. That is the wrong trade here.
+- Four `claude -p` workers are four KV caches. One resident 120B
+  model does not have four 200k caches left on 128 GB. The cap of 4
+  exists to protect a cloud prompt cache. On this box it is four
+  ways to miss.
+- Consensus, judge, and cross-family recheck want a second model
+  family. A second 120B does not load beside the first. A small
+  judge model still takes memory the KV cache needed.
+- Replacing Claude Code's on-demand skill load with "put the skills
+  in the prompt" is the failure mode. Skill markdown is ~97k tokens
+  if dumped, command bodies ~58k. Either one is a third to a half of
+  the window before any target code. The current tree avoids that
+  only because Claude Code loads one command and one skill. A local
+  orchestrator that inlines the catalog to compensate will gobble
+  the window the 120B model spent its memory to open.
+
+What the resident prefix already costs, if the `claude` binary stays:
+about 19k of Claude's own system prompt plus 6.6k of `CLAUDE.md`,
+before the command body. That is ~13% of 200k gone on every turn,
+and it is text that does not describe the target. On a frontier API
+that prefix is a cache asset. Here it is weight the code under
+analysis does not get.
+
+The port should treat unused context as the goal. Short resident
+prompt, one call at a time, target code kept, framework text shed
+first. The scanners stay the verdict path. A workflow that needs
+400k, a second frontier model, or four hot prefixes is a different
+machine.
