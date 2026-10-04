@@ -447,3 +447,47 @@ prompt, one call at a time, target code kept, framework text shed
 first. The scanners stay the verdict path. A workflow that needs
 400k, a second frontier model, or four hot prefixes is a different
 machine.
+
+### Three other boxes, not interchangeable with the Spark
+
+Same port, three different memory hierarchies. None of them is the
+one-Spark target above, and none of them is "250 GB of fast memory."
+
+KV figures below are fp16 K+V for a known shape, not a promise about
+every 120B. Llama 3 8B (32 layers, 8 KV heads, head dim 128) is
+about 1.1 GB at 8k, 4.3 GB at 32k, 26 GB at 200k. Llama 3 70B
+(80 layers, same GQA) is about 2.7 GB at 8k, 11 GB at 32k, 66 GB at
+200k. A 120B is in that band or higher, depending on KV heads.
+
+- **RTX 3060, 12 GB VRAM, 128 GB system RAM.** The fast tier is
+  12 GB. A 7–8B Q4 fits there with a short cache. A 14B Q4 leaves
+  almost no KV. A 32B does not reside. A 70B or 120B can sit in the
+  128 GB RAM via offload, and then decode is DDR-bound, not GPU-bound.
+  200k on an 8B is already ~26 GB of KV, larger than the VRAM. Four
+  workers do not fit. vLLM will not place a useful model. llama.cpp
+  partial offload is the server that matches the RAM, and it will
+  miss the 600s call timeout on a 60k prefill. This box runs
+  scanners. It does not run the 120B / 200k workload.
+- **One B100 server, 250 GB RAM.** 250 GB is system RAM unless a
+  datasheet says otherwise. NVIDIA's current HGX B200 board lists
+  1.4 TB of GPU memory across 8 GPUs, on the order of 180 GB HBM
+  per GPU. A single B100 is that class of part, not a 250 GB HBM
+  part. The fast tier is the GPU. Spilling weights or KV into the
+  250 GB throws away the HBM bandwidth you bought the machine for.
+  One GPU, so no tensor parallel: concurrency is batching inside one
+  server process, not four `claude -p` children. A quantized 120B
+  can reside. A 120B at fp16 (~240 GB) does not fit in one
+  Blackwell GPU's HBM. The 400k CVE-diff loop still does not fit a
+  200k working window.
+- **Mac Studio M5 Ultra, 512 GB unified, 1.2 TB/s.** Apple's spec
+  page lists this as a configure option on the 36-core / 80-core
+  Ultra. The 512 GB is the fast tier. No PCIe split. This is the
+  only one of the three that can hold a 120B at fp16 (~240 GB) and
+  still have room for a long cache and a small second model. Two
+  fp16 120B models (~480 GB) leave almost no KV, so cross-family at
+  full size still does not fit. Metal, not CUDA: vLLM's CUDA build
+  does not run. llama.cpp Metal or MLX does. RAPTOR's sandbox is
+  Linux namespaces; the Mac path is seatbelt, and AFL++ / Landlock
+  are not there. Memory fit does not make the execution layer local.
+
+Per-box limits are issues, not one shared "workstation" profile.
